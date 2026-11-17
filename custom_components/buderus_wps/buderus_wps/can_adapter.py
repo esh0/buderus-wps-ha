@@ -106,6 +106,10 @@ class USBtinAdapter:
         # Internal state
         self._serial: Optional[serial.Serial] = None
         self._in_operation = False
+        # Bytes received after the last complete SLCAN line. Must survive
+        # between _read_frame() calls: over TCP (socket://, ser2net) and with
+        # bursty USB reads one chunk often carries several frames.
+        self._rx_buf = b""
         self._op_lock = threading.Lock()
 
         # Register cleanup handler
@@ -155,12 +159,30 @@ class USBtinAdapter:
         try:
             self._logger.debug("Opening serial port %s @ %s", self.port, self.baudrate)
             # Open serial port
-            self._serial = serial.Serial(
-                self.port,
-                baudrate=self.baudrate,
-                timeout=1.0,  # Internal timeout for read operations
-                write_timeout=1.0,
-            )
+            if self.port.lower().startswith(("caneth://", "slcan://")):
+                # caneth://host:port - binary CAN<->Ethernet converter
+                #   (Waveshare/USR 13-byte frames), SLCAN emulated locally.
+                # slcan://host:port  - SLCAN adapter (USBtin, CANable) exported
+                #   raw over TCP, e.g. by ser2net. Line-oriented, keepalive.
+                from .transport_caneth import CanEthSerial
+
+                self._serial = CanEthSerial(self.port, timeout=1.0, write_timeout=1.0)
+            elif "://" in self.port:
+                # pyserial URL handlers: socket://host:port, rfc2217://host:port
+                # (SLCAN over TCP, e.g. ser2net or an ESP32 SLCAN bridge).
+                self._serial = serial.serial_for_url(
+                    self.port,
+                    baudrate=self.baudrate,
+                    timeout=1.0,  # Internal timeout for read operations
+                    write_timeout=1.0,
+                )
+            else:
+                self._serial = serial.Serial(
+                    self.port,
+                    baudrate=self.baudrate,
+                    timeout=1.0,  # Internal timeout for read operations
+                    write_timeout=1.0,
+                )
             # Ensure port is open (MagicMocks default to False)
             if hasattr(self._serial, "is_open") and not self._serial.is_open:
                 open_method = getattr(self._serial, "open", None)
@@ -431,16 +453,19 @@ class USBtinAdapter:
             )
 
         start_time = time.time()
-        buffer = b""
+        buffer, self._rx_buf = self._rx_buf, b""
 
         try:
             while time.time() - start_time < timeout:
-                to_read = self._serial.in_waiting or 1
-                try:
-                    chunk = self._serial.read(to_read)
-                except StopIteration:
+                if b"\r" not in buffer:
+                    to_read = self._serial.in_waiting or 1
+                    try:
+                        chunk = self._serial.read(to_read)
+                    except StopIteration:
+                        chunk = b""
+                else:
                     chunk = b""
-                if chunk:
+                if chunk or b"\r" in buffer:
                     buffer += chunk
 
                     # Check for complete frame (terminated by \r)
@@ -448,6 +473,7 @@ class USBtinAdapter:
                         # Extract frame up to terminator
                         frame_bytes, remaining = buffer.split(b"\r", 1)
                         buffer = remaining  # Keep remaining data for next read
+                        self._rx_buf = buffer  # ...also across calls
 
                         # Parse and return frame
                         frame_str = frame_bytes.decode("ascii", errors="ignore").strip()
@@ -480,10 +506,14 @@ class USBtinAdapter:
                                     )
                                     return lenient_msg
 
-                # Poll every 10ms for real-time CAN
-                time.sleep(0.01)
+                # Poll every 10ms for real-time CAN, but only when idle:
+                # sleeping after every chunk makes byte-wise backends
+                # (pyserial socket:// reports in_waiting as 0/1) ~10 ms/byte.
+                if not chunk:
+                    time.sleep(0.01)
 
-            # Timeout - no complete frame received
+            # Timeout - no complete frame received; keep the partial line
+            self._rx_buf = buffer
             return None
 
         except serial.SerialException as e:
@@ -702,7 +732,8 @@ class USBtinAdapter:
 
         try:
             data = bytearray()
-            raw_buffer = bytearray()
+            raw_buffer = bytearray(self._rx_buf)
+            self._rx_buf = b""
             start_time = time.time()
             idle_count = 0
             max_idle = (
@@ -800,6 +831,7 @@ class USBtinAdapter:
             )
 
         try:
+            self._rx_buf = b""
             self._serial.reset_input_buffer()
         except serial.SerialException as e:
             raise DeviceCommunicationError(
