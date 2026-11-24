@@ -227,7 +227,7 @@ Besides a local USBtin (`/dev/ttyACM0`), the *Serial Port* field accepts:
 | `caneth://<host>:<port>` | Binary CAN-to-Ethernet converters using the 13-byte frame format (Waveshare 2-CH-CAN-TO-ETH, USR-CAN115, USR-CANET200). Configure the converter for 125 kbit/s, TCP Server, "standard protocol"/13-byte conversion, no ID filters, CAN heartbeat off. |
 | `socket://<host>:<port>` / `rfc2217://<host>:<port>` | SLCAN over TCP (e.g. USBtin behind ser2net, ESP32 SLCAN bridge). |
 
-The `caneth://` transport emulates SLCAN on top of the binary protocol, so the rest of the library is unchanged. A self-test with a simulated converter: `python3 -I tests/manual/caneth_selftest.py custom_components/buderus_wps`.
+The `caneth://` transport emulates SLCAN on top of the binary protocol, so the rest of the library is unchanged. A self-test with a simulated converter: `python3 tests/manual/caneth_selftest.py custom_components/buderus_wps` (requires `pyserial`).
 
 This is a duplicate of [reinlemmens/buderus-wps-ha](https://github.com/reinlemmens/buderus-wps-ha) (MIT) with the transport additions above; all credit for the integration goes to the original author.
 

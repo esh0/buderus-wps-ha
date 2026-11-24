@@ -1,5 +1,7 @@
 import socket, sys, threading, time, logging
-sys.path.insert(0, sys.argv[1])
+# Append, don't prepend: the integration dir contains select.py, which would
+# shadow the stdlib 'select' module (imported by socket/asyncio).
+sys.path.append(sys.argv[1])
 from buderus_wps.can_adapter import USBtinAdapter
 from buderus_wps.can_message import CANMessage
 from buderus_wps.transport_caneth import binary_to_slcan, slcan_to_binary
