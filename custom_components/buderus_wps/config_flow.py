@@ -94,15 +94,14 @@ class BuderusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> BuderusOptionsFlow:
         """Get the options flow for this handler."""
-        return BuderusOptionsFlow(config_entry)
+        return BuderusOptionsFlow()
 
 
 class BuderusOptionsFlow(config_entries.OptionsFlow):
     """Handle options flow for Buderus WPS Heat Pump."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
+    # No __init__: OptionsFlow.config_entry is provided by Home Assistant.
+    # Assigning it explicitly raises since HA 2025.12 (500 on "Configure").
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
